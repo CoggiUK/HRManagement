@@ -1,49 +1,85 @@
 import bcrypt from 'bcrypt';
 
 class AuthService {
-  constructor(UserModel) {
-    this.UserModel = UserModel;
-  }
-
-  async register(userData) {
-    const { UserName, Password, Role } = userData;
-
-    // Kiểm tra nếu UserName đã tồn tại
-    const existingUser = await this.UserModel.findOne({ where: { UserName } });
-    if (existingUser) {
-      throw new Error('Tên người dùng đã tồn tại');
+    constructor(UserModel) {
+        this.UserModel = UserModel;
     }
 
-    // Mã hóa mật khẩu
-    const hashedPassword = await bcrypt.hash(Password, 10);
+    async register(userData) {
+        try {
+            const { UserName, Password, Role } = userData;
 
-    // Tạo user mới
-    const newUser = await this.UserModel.create({
-      UserName,
-      Password: hashedPassword,
-      Role,
-    });
+            // Kiểm tra user tồn tại
+            const existingUser = await this.UserModel.findOne({ 
+                where: { 
+                    UserName: UserName,
+                    DeletedAt: null
+                },
+                attributes: ['UserId', 'UserName']
+            });
 
-    return newUser;
-  }
+            if (existingUser) {
+                throw new Error('Tên người dùng đã tồn tại');
+            }
 
-  async login(credentials) {
-    const { UserName, Password } = credentials;
+            // Hash password
+            const hashedPassword = await bcrypt.hash(Password, 10);
 
-    // Tìm user theo UserName
-    const user = await this.UserModel.findOne({ where: { UserName } });
-    if (!user) {
-      throw new Error('Tên người dùng hoặc mật khẩu không đúng');
+            // Tạo user mới - chỉ tạo trong bảng Users
+            const newUser = await this.UserModel.create({
+                UserName,
+                Password: hashedPassword,
+                Role
+            }, {
+                // Chỉ lấy các trường cần thiết
+                fields: ['UserName', 'Password', 'Role']
+            });
+
+            // Trả về thông tin user không bao gồm password
+            return {
+                UserId: newUser.UserId,
+                UserName: newUser.UserName,
+                Role: newUser.Role,
+                CreatedAt: newUser.CreatedAt
+            };
+
+        } catch (error) {
+            console.error('Registration error:', error);
+            throw new Error(`Đăng ký thất bại: ${error.message}`);
+        }
     }
 
-    // So sánh mật khẩu
-    const isPasswordValid = await bcrypt.compare(Password, user.Password);
-    if (!isPasswordValid) {
-      throw new Error('Tên người dùng hoặc mật khẩu không đúng');
-    }
+    async login(credentials) {
+        try {
+            const { UserName, Password } = credentials;
 
-    return user; // Chỉ trả về thông tin người dùng nếu đăng nhập thành công
-  }
+            // Find user
+            const user = await this.UserModel.findOne({ 
+                where: { 
+                    UserName,
+                    DeletedAt: null
+                },
+                attributes: ['UserId', 'UserName', 'Password', 'Role']
+            });
+
+            if (!user) {
+                throw new Error('Tên người dùng hoặc mật khẩu không đúng');
+            }
+
+            // Compare password
+            const isValidPassword = await bcrypt.compare(Password, user.Password);
+            if (!isValidPassword) {
+                throw new Error('Tên người dùng hoặc mật khẩu không đúng');
+            }
+
+            // Return without password
+            const { Password: _, ...userWithoutPassword } = user.toJSON();
+            return userWithoutPassword;
+
+        } catch (error) {
+            throw new Error(`Login failed: ${error.message}`);
+        }
+    }
 }
 
 export default AuthService;
